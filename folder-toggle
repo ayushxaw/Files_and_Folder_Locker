@@ -1,0 +1,15 @@
+#!/bin/bash
+# Quick toggle for a default folder (~/Documents/PERSONAL) or pick any folder.
+
+MOUNT="$HOME/Documents/PERSONAL"
+VAULT="$HOME/Documents/.PERSONAL_vault"
+
+if [ -f "$VAULT/gocryptfs.conf" ]; then
+    if findmnt -M "$MOUNT" &>/dev/null; then
+        exec "$HOME/.local/bin/folder-lock" "$MOUNT"
+    else
+        exec "$HOME/.local/bin/folder-unlock" "$MOUNT"
+    fi
+else
+    exec "$HOME/.local/bin/folder-unlock"
+fi

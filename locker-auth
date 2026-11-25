@@ -1,0 +1,23 @@
+#!/bin/bash
+# Shared authentication helper using the user's Linux login password.
+
+_authenticate() {
+    local prompt="${1:-Enter your system password:}"
+
+    while true; do
+        MASTER_PASS=$(zenity --password \
+            --title="Folder Locker" \
+            --text="$prompt" \
+            --width=350 2>/dev/null) || exit 0
+
+        if echo "$MASTER_PASS" | sudo -S -k true 2>/dev/null; then
+            export MASTER_PASS
+            return 0
+        fi
+
+        zenity --warning \
+            --title="Folder Locker" \
+            --text="Wrong password, try again." \
+            --width=250 2>/dev/null || exit 0
+    done
+}

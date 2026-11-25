@@ -1,0 +1,57 @@
+#!/bin/bash
+# Lock (unmount) an encrypted folder.
+# Usage: folder-lock [path]
+
+set -euo pipefail
+
+TARGET="${1:-}"
+
+if [ -z "$TARGET" ]; then
+    TARGET=$(zenity --file-selection --directory \
+        --title="Select a folder to lock" 2>/dev/null) || exit 0
+fi
+
+TARGET=$(realpath "$TARGET")
+PARENT=$(dirname "$TARGET")
+NAME=$(basename "$TARGET")
+VAULT="$PARENT/.${NAME}_vault"
+
+if [ ! -f "$VAULT/gocryptfs.conf" ]; then
+    zenity --error --title="Folder Locker" \
+        --text="'$NAME' is not an encrypted folder." --width=300 2>/dev/null
+    exit 1
+fi
+
+if ! findmnt -M "$TARGET" &>/dev/null; then
+    zenity --info --title="Folder Locker" \
+        --text="'$NAME' is already locked." --width=250 2>/dev/null
+    exit 0
+fi
+
+sync
+if ! (fusermount3 -u "$TARGET" 2>/dev/null || fusermount -u "$TARGET" 2>/dev/null); then
+    fusermount3 -uz "$TARGET" 2>/dev/null || umount -l "$TARGET" 2>/dev/null || true
+fi
+
+sleep 0.5
+if findmnt -M "$TARGET" &>/dev/null; then
+    zenity --error --title="Folder Locker" \
+        --text="Could not lock '$NAME'. Close any open files inside it first." \
+        --width=320 2>/dev/null
+    exit 1
+fi
+
+mkdir -p "$TARGET"
+cat > "$TARGET/LOCKED.txt" << 'EOF'
+This folder is locked. Right-click -> Unlock This Folder
+EOF
+
+ICON_FILE="$HOME/.local/share/icons/custom/folder-${NAME,,}.png"
+if [ -f "$ICON_FILE" ]; then
+    gio set "$TARGET" metadata::custom-icon "file://$ICON_FILE" 2>/dev/null || true
+fi
+
+zenity --info --title="Folder Locker" \
+    --text="'$NAME' is locked." --width=250 2>/dev/null &
+
+exit 0

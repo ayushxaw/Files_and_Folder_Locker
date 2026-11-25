@@ -1,0 +1,127 @@
+#!/bin/bash
+# Encrypt a folder (with gocryptfs) or a single file (with gpg AES-256).
+# Usage: folder-encrypt [path]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "$SCRIPT_DIR/locker-auth"
+
+TARGET="${1:-}"
+
+if [ -z "$TARGET" ]; then
+    TARGET=$(zenity --file-selection \
+        --title="Select a file or folder to encrypt" 2>/dev/null) || exit 0
+fi
+
+TARGET=$(realpath "$TARGET")
+NAME=$(basename "$TARGET")
+
+if [ -f "$TARGET" ]; then
+    if [[ "$TARGET" == *.locked ]]; then
+        zenity --info --title="Folder Locker" \
+            --text="'$NAME' is already locked." --width=250 2>/dev/null
+        exit 0
+    fi
+
+    zenity --question --title="Encrypt File" \
+        --text="Encrypt <b>'$NAME'</b>?\n\nIt will be locked with your system password." \
+        --width=350 2>/dev/null || exit 0
+
+    _authenticate "Enter system password to encrypt '$NAME':"
+
+    echo "$MASTER_PASS" | gpg --batch --yes --passphrase-fd 0 \
+        --symmetric --cipher-algo AES256 \
+        --output "${TARGET}.locked" "$TARGET" 2>/dev/null
+    unset MASTER_PASS
+
+    if [ -f "${TARGET}.locked" ]; then
+        rm -f "$TARGET"
+        zenity --info --title="Folder Locker" \
+            --text="'$NAME' is now encrypted as ${NAME}.locked.\n\nRight-click -> Unlock This File to decrypt it." \
+            --width=350 2>/dev/null &
+    else
+        zenity --error --title="Folder Locker" \
+            --text="Failed to encrypt '$NAME'." --width=250 2>/dev/null
+        exit 1
+    fi
+
+elif [ -d "$TARGET" ]; then
+    PARENT=$(dirname "$TARGET")
+    VAULT="$PARENT/.${NAME}_vault"
+
+    if [ -f "$VAULT/gocryptfs.conf" ]; then
+        zenity --info --title="Folder Locker" \
+            --text="'$NAME' is already encrypted. Use Lock or Unlock from the menu." \
+            --width=300 2>/dev/null
+        exit 0
+    fi
+
+    if ! command -v gocryptfs &>/dev/null; then
+        zenity --error --title="Folder Locker" \
+            --text="gocryptfs is not installed.\n\nInstall it with: sudo apt install gocryptfs" \
+            --width=350 2>/dev/null
+        exit 1
+    fi
+
+    zenity --question --title="Encrypt Folder" \
+        --text="Encrypt <b>'$NAME'</b>?\n\nEverything inside will be protected with your system password." \
+        --width=380 2>/dev/null || exit 0
+
+    _authenticate "Enter system password to encrypt '$NAME':"
+
+    BACKUP="/tmp/.folder_encrypt_$$"
+    HAS_FILES=false
+    if [ "$(ls -A "$TARGET" 2>/dev/null)" ]; then
+        mkdir -p "$BACKUP"
+        cp -a "$TARGET"/. "$BACKUP"/
+        HAS_FILES=true
+    fi
+
+    mkdir -p "$VAULT"
+    if ! echo "$MASTER_PASS" | gocryptfs -init -q "$VAULT" 2>/dev/null; then
+        zenity --error --title="Folder Locker" \
+            --text="Failed to initialize encrypted vault." --width=280 2>/dev/null
+        [ "$HAS_FILES" = true ] && rm -rf "$BACKUP"
+        rmdir "$VAULT" 2>/dev/null || true
+        unset MASTER_PASS
+        exit 1
+    fi
+
+    rm -rf "$TARGET"
+    mkdir -p "$TARGET"
+    echo "$MASTER_PASS" | gocryptfs -q "$VAULT" "$TARGET" 2>/dev/null
+    unset MASTER_PASS
+
+    if ! findmnt -M "$TARGET" &>/dev/null; then
+        zenity --error --title="Folder Locker" \
+            --text="Failed to mount vault." --width=250 2>/dev/null
+        if [ "$HAS_FILES" = true ]; then
+            rm -rf "$TARGET"
+            mv "$BACKUP" "$TARGET"
+        fi
+        exit 1
+    fi
+
+    if [ "$HAS_FILES" = true ]; then
+        cp -a "$BACKUP"/. "$TARGET"/
+        rm -rf "$BACKUP"
+    fi
+
+    sync
+    fusermount3 -u "$TARGET" 2>/dev/null || fusermount -u "$TARGET" 2>/dev/null
+    mkdir -p "$TARGET"
+    cat > "$TARGET/LOCKED.txt" << 'EOF'
+This folder is locked. Right-click -> Unlock This Folder
+EOF
+
+    zenity --info --title="Folder Locker" \
+        --text="'$NAME' is now encrypted and locked.\n\nRight-click -> Unlock This Folder whenever you need it." \
+        --width=350 2>/dev/null &
+else
+    zenity --error --title="Folder Locker" \
+        --text="'$TARGET' was not found." --width=250 2>/dev/null
+    exit 1
+fi
+
+exit 0
