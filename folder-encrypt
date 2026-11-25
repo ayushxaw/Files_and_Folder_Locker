@@ -112,7 +112,13 @@ elif [ -d "$TARGET" ]; then
     fusermount3 -u "$TARGET" 2>/dev/null || fusermount -u "$TARGET" 2>/dev/null
     mkdir -p "$TARGET"
     cat > "$TARGET/LOCKED.txt" << 'EOF'
-This folder is locked. Right-click -> Unlock This Folder
+This folder is locked. Use any of these methods to unlock:
+
+1. Right-click this folder (or empty space inside it) -> Unlock This Folder
+2. For locked files (*.locked): right-click the file -> Unlock This File
+3. Keyboard shortcut: press Ctrl + Super + L
+4. App menu / Dock: open "Folder Locker"
+5. Terminal: folder-unlock "/path/to/folder_or_file.locked"
 EOF
 
     zenity --info --title="Folder Locker" \
