@@ -23,20 +23,35 @@ if [ -f "$TARGET" ] && [[ "$TARGET" == *.locked ]]; then
 
     _authenticate "Enter system password to unlock '$ORIG_NAME':"
 
-    echo "$MASTER_PASS" | gpg --batch --yes --passphrase-fd 0 \
-        --decrypt --output "$ORIGINAL" "$TARGET" 2>/dev/null
-    unset MASTER_PASS
-
-    if [ -f "$ORIGINAL" ]; then
-        rm -f "$TARGET"
-        zenity --info --title="Folder Locker" \
-            --text="'$ORIG_NAME' is unlocked." --width=250 2>/dev/null &
-    else
+    if ! echo "$MASTER_PASS" | gpg --batch --yes --passphrase-fd 0 \
+        --decrypt --output "$ORIGINAL" "$TARGET" 2>/dev/null || [ ! -f "$ORIGINAL" ]; then
+        unset MASTER_PASS
         zenity --error --title="Folder Locker" \
             --text="Could not decrypt '$ORIG_NAME'. Wrong password or corrupted file." \
             --width=320 2>/dev/null
         exit 1
     fi
+
+    rm -f "$TARGET"
+    nautilus "$(dirname "$ORIGINAL")" &>/dev/null &
+
+    # Watch Nautilus and re-lock the file in memory once Files closes.
+    (
+        sleep 5
+        while pgrep -x nautilus &>/dev/null; do
+            sleep 3
+        done
+        if [ -f "$ORIGINAL" ] && [ ! -f "$TARGET" ]; then
+            if echo "$MASTER_PASS" | gpg --batch --yes --passphrase-fd 0 \
+                --symmetric --cipher-algo AES256 \
+                --output "$TARGET" "$ORIGINAL" 2>/dev/null; then
+                rm -f "$ORIGINAL"
+            fi
+        fi
+        unset MASTER_PASS
+    ) &
+    disown
+    unset MASTER_PASS
     exit 0
 fi
 
